@@ -75,9 +75,26 @@ export default function CreateSessionFlow() {
 
       // 4. Navigate to study screen for this session
       router.push(`/review-cards?sessionId=${session.documentId}`);
-    } catch (err: any) {
+        } catch (err: any) {
       setStatus("error");
-      setErrorMsg(err.message || "Something went wrong.");
+      // FIX: pehle sirf err.message dikhaya jata tha, jo kabhi kabhi
+      // raw/technical Gemini API error hota hai (jaise 503 JSON blob).
+      // Ab specific, temporary AI-overload wale errors ko pehchan kar
+      // user-friendly message dikhate hain, taake "Try Again" ka matlab
+      // user ko samajh aaye.
+      const rawMessage = err?.message || "";
+      const isModelOverloaded =
+        rawMessage.includes("503") ||
+        rawMessage.toLowerCase().includes("high demand") ||
+        rawMessage.toLowerCase().includes("currently experiencing");
+
+      if (isModelOverloaded) {
+        setErrorMsg(
+          "The AI model is currently busy. Please wait a few seconds and click Try Again."
+        );
+      } else {
+        setErrorMsg(rawMessage || "Something went wrong.");
+      }
     }
   };
 
