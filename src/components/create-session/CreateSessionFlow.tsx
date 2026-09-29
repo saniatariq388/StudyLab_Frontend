@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { extractTextFromImage } from "../../lib/ocr";
 import { createStudySession, generateFlashcards } from "../../services/studySessionService";
+import { uploadImages } from "../../services/uploadService"; // FIX: naya import
 import UploadDropzone from "./UploadDropzone";
 import UploadedPagesPanel from "./UploadedPagesPanel";
 import ExtractionConfigForm from "./ExtractionConfigForm";
@@ -14,14 +15,13 @@ interface StagedFile {
 }
 
 export default function CreateSessionFlow() {
-
   const [files, setFiles] = useState<StagedFile[]>([]);
   const [pastedText, setPastedText] = useState<string>("");
   const [sessionName, setSessionName] = useState(
-  `Study Session — ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
-   );
+    `Study Session — ${new Date().toLocaleDateString()} ${new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`
+  );
   const [density, setDensity] = useState<"core" | "detailed">("core");
-  const [status, setStatus] = useState<"idle" | "ocr" | "generating" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "ocr" | "uploading" | "generating" | "error">("idle");
   const [errorMsg, setErrorMsg] = useState("");
   const router = useRouter();
 
@@ -35,7 +35,6 @@ export default function CreateSessionFlow() {
   const handleTextPasted = (text: string) => {
     setPastedText(text);
   };
-
 
   const handleRemoveFile = (id: string) => {
     setFiles((prev) => prev.filter((f) => f.id !== id));
@@ -52,6 +51,7 @@ export default function CreateSessionFlow() {
       const session = await createStudySession({ name: sessionName });
 
       let combinedText = pastedText.trim();
+      let uploadedImageIds: number[] = []; // FIX: yahan image IDs collect karenge
 
       if (files.length > 0) {
         setStatus("ocr");
@@ -59,42 +59,38 @@ export default function CreateSessionFlow() {
           const text = await extractTextFromImage(staged.file);
           combinedText += "\n\n" + text;
         }
+
+        // FIX: OCR ke baad, asal image files ko Strapi par upload karo
+        setStatus("uploading");
+        uploadedImageIds = await uploadImages(files.map((f) => f.file));
       }
 
       if (!combinedText.trim()) {
         throw new Error("Could not extract any text from the uploaded pages.");
       }
 
-      // 3. Generate flashcards via AI
       setStatus("generating");
       await generateFlashcards({
         extractedText: combinedText,
         studySessionId: session.documentId,
         density,
+        imageIds: uploadedImageIds, // FIX: backend ko bhej rahe hain
       });
 
-      // 4. Navigate to study screen for this session
       router.push(`/review-cards?sessionId=${session.documentId}`);
-        } catch (err: any) {
+    } catch (err: any) {
       setStatus("error");
-      // FIX: pehle sirf err.message dikhaya jata tha, jo kabhi kabhi
-      // raw/technical Gemini API error hota hai (jaise 503 JSON blob).
-      // Ab specific, temporary AI-overload wale errors ko pehchan kar
-      // user-friendly message dikhate hain, taake "Try Again" ka matlab
-      // user ko samajh aaye.
       const rawMessage = err?.message || "";
       const isModelOverloaded =
         rawMessage.includes("503") ||
         rawMessage.toLowerCase().includes("high demand") ||
         rawMessage.toLowerCase().includes("currently experiencing");
 
-      if (isModelOverloaded) {
-        setErrorMsg(
-          "The AI model is currently busy. Please wait a few seconds and click Try Again."
-        );
-      } else {
-        setErrorMsg(rawMessage || "Something went wrong.");
-      }
+      setErrorMsg(
+        isModelOverloaded
+          ? "The AI model is currently busy. Please wait a few seconds and click Try Again."
+          : rawMessage || "Something went wrong."
+      );
     }
   };
 
@@ -109,7 +105,7 @@ export default function CreateSessionFlow() {
           onDensityChange={setDensity}
         />
       </div>
- <div className="col-span-1 space-y-6">
+      <div className="col-span-1 space-y-6">
         <UploadedPagesPanel files={files} onRemove={handleRemoveFile} />
 
         {pastedText && (
@@ -119,17 +115,17 @@ export default function CreateSessionFlow() {
           </div>
         )}
 
-      
         {errorMsg && (
           <div className="rounded-xl bg-red-50 p-3 text-sm text-red-600">{errorMsg}</div>
         )}
 
         <button
           onClick={handleGenerate}
-          disabled={status === "ocr" || status === "generating"}
+          disabled={status === "ocr" || status === "uploading" || status === "generating"}
           className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3 text-sm font-medium text-white hover:bg-indigo-700 disabled:opacity-60"
         >
           {status === "ocr" && "Reading pages..."}
+          {status === "uploading" && "Uploading images..."}
           {status === "generating" && "Generating flashcards with AI..."}
           {status === "idle" && "✨ Generate Flashcards with AI"}
           {status === "error" && "Try Again"}

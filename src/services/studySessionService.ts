@@ -28,6 +28,7 @@ export async function generateFlashcards(payload: {
   extractedText: string;
   studySessionId: string;
   density: "core" | "detailed";
+  imageIds?: number[]; // FIX: naya optional field add kiya, taake uploaded images ke IDs bhi backend ko bhej sakein
 }) {
   return authFetch("/api/generate-flashcards", {
     method: "POST",
